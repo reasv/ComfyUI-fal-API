@@ -291,6 +291,8 @@ class KlingMasterNode:
             },
             "optional": {
                 "image": ("IMAGE",),
+                "negative_prompt": ("STRING", {"default": "", "multiline": True}),
+                "cfg_scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
 
@@ -298,12 +300,16 @@ class KlingMasterNode:
     FUNCTION = "generate_video"
     CATEGORY = "FAL/VideoGeneration"
 
-    def generate_video(self, prompt, duration, aspect_ratio, image=None):
+    def generate_video(self, prompt, duration, aspect_ratio, image=None, negative_prompt="", cfg_scale=0.5):
         arguments = {
             "prompt": prompt,
             "duration": duration,
             "aspect_ratio": aspect_ratio,
         }
+        if negative_prompt is not None and len(negative_prompt) > 0:
+            arguments["negative_prompt"] = negative_prompt
+        if cfg_scale is not None:
+            arguments["cfg_scale"] = cfg_scale
 
         try:
             if image is not None:
