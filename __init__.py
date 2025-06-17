@@ -8,7 +8,8 @@ node_list = [
     "vlm_node",
     "trainer_node",
     "upscaler_node",
-    "lipsync_node"
+    "lipsync_node",
+    "video_utils",
 ]
 
 NODE_CLASS_MAPPINGS = {}
