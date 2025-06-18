@@ -77,7 +77,7 @@ class VeedLipsyncNode:
                 "video_url": video_url,
                 "audio_url": audio_url,
             }
-            result = ApiHandler.submit_and_get_result("fal-ai/veed/lipsync", arguments)
+            result = ApiHandler.submit_and_get_result("veed/lipsync", arguments)
 
             video_url = result["video"]["url"]
             return (video_url,)
@@ -163,7 +163,7 @@ class CombinedLipsyncNode:
             "uses_sync_mode": True,
         },
         "Veed.io Lipsync": {
-            "path": "fal-ai/veed/lipsync",
+            "path": "veed/lipsync",
             "uses_sync_mode": False,
         },
         "Tavus Hummingbird Lipsync": {
