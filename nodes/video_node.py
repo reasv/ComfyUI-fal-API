@@ -351,6 +351,61 @@ class KlingMasterNode:
                 "kling-video/v2/master", str(e)
             )
 
+class Kling21MasterNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "duration": (["5", "10"], {"default": "5"}),
+                "aspect_ratio": (["16:9", "9:16", "1:1"], {"default": "16:9"}),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+                "negative_prompt": ("STRING", {"default": "", "multiline": True}),
+                "cfg_scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "generate_video"
+    CATEGORY = "FAL/VideoGeneration"
+
+    def generate_video(self, prompt, duration, aspect_ratio, image=None, negative_prompt="", cfg_scale=0.5):
+        arguments = {
+            "prompt": prompt,
+            "duration": duration,
+            "aspect_ratio": aspect_ratio,
+        }
+        if negative_prompt is not None and len(negative_prompt) > 0:
+            arguments["negative_prompt"] = negative_prompt
+        if cfg_scale is not None:
+            arguments["cfg_scale"] = cfg_scale
+
+        try:
+            if image is not None:
+                image_url = ImageUtils.upload_image(image)
+                if image_url:
+                    arguments["image_url"] = image_url
+                    result = ApiHandler.submit_and_get_result(
+                        "fal-ai/kling-video/v2.1/master/image-to-video", arguments
+                    )
+                else:
+                    return ApiHandler.handle_video_generation_error(
+                        "kling-video/v2.1/master", "Failed to upload image"
+                    )
+            else:
+                result = ApiHandler.submit_and_get_result(
+                    "fal-ai/kling-video/v2.1/master/text-to-video", arguments
+                )
+
+            video_url = result["video"]["url"]
+            return (video_url,)
+        except Exception as e:
+            return ApiHandler.handle_video_generation_error(
+                "kling-video/v2.1/master", str(e)
+            )
+
 
 class RunwayGen3Node:
     @classmethod
@@ -1207,6 +1262,7 @@ NODE_CLASS_MAPPINGS = {
     "KlingPro10_fal": KlingPro10Node,
     "KlingPro16_fal": KlingPro16Node,
     "KlingMaster_fal": KlingMasterNode,
+    "Kling21Master_fal": Kling21MasterNode,
     "RunwayGen3_fal": RunwayGen3Node,
     "LumaDreamMachine_fal": LumaDreamMachineNode,
     "LoadVideoURL": LoadVideoURL,
@@ -1228,6 +1284,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KlingPro10_fal": "Kling Pro v1.0 Video Generation (fal)",
     "KlingPro16_fal": "Kling Pro v1.6 Video Generation (fal)",
     "KlingMaster_fal": "Kling Master v2.0 Video Generation (fal)",
+    "Kling21Master_fal": "Kling Master v2.1 Video Generation (fal)",
     "RunwayGen3_fal": "Runway Gen3 Image-to-Video (fal)",
     "LumaDreamMachine_fal": "Luma Dream Machine (fal)",
     "LoadVideoURL": "Load Video from URL",
