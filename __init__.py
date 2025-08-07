@@ -10,6 +10,7 @@ node_list = [
     "upscaler_node",
     "lipsync_node",
     "video_utils",
+    "video_overlays",
 ]
 
 NODE_CLASS_MAPPINGS = {}
