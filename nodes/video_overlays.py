@@ -8,6 +8,8 @@ import numpy as np
 import base64
 from io import BytesIO
 import tempfile
+import subprocess
+import shutil
 
 def overlay_image_on_video_objects(video_path, overlay_image_pil, output_path):
     """
@@ -42,9 +44,34 @@ def overlay_image_on_video_objects(video_path, overlay_image_pil, output_path):
         overlay_rgb = cv2.cvtColor(overlay_rgba, cv2.COLOR_RGBA2RGB)
         overlay_alpha = overlay_rgba[:, :, 3] / 255.0  # Normalize alpha channel
         
-        # Set up video writer
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        # Create temporary output path for OpenCV
+        temp_output = output_path.replace('.mp4', '_temp.mp4')
+        
+        # Try H.264 codec first (most compatible with browsers)
+        codecs_to_try = [
+            ('H264', cv2.VideoWriter_fourcc(*'H264')),
+            ('h264', cv2.VideoWriter_fourcc(*'h264')),
+            ('avc1', cv2.VideoWriter_fourcc(*'avc1')),
+            ('X264', cv2.VideoWriter_fourcc(*'X264')),
+            ('x264', cv2.VideoWriter_fourcc(*'x264')),
+            ('mp4v', cv2.VideoWriter_fourcc(*'mp4v')),  # Fallback to original
+        ]
+        
+        out = None
+        used_codec = None
+        
+        # Try different codecs until one works
+        for codec_name, fourcc in codecs_to_try:
+            out = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
+            if out.isOpened():
+                print(f"Using codec: {codec_name}")
+                used_codec = codec_name
+                break
+            out.release()
+        
+        if not out or not out.isOpened():
+            print("Failed to open video writer with any codec")
+            return False
         
         frame_count = 0
         
@@ -79,6 +106,38 @@ def overlay_image_on_video_objects(video_path, overlay_image_pil, output_path):
         cap.release()
         out.release()
         cv2.destroyAllWindows()
+        
+        # If we couldn't use H.264 codec and ffmpeg is available, re-encode for browser compatibility
+        if used_codec == 'mp4v' and shutil.which('ffmpeg'):
+            print("Re-encoding with ffmpeg for browser compatibility...")
+            try:
+                cmd = [
+                    'ffmpeg',
+                    '-i', temp_output,
+                    '-c:v', 'libx264',  # H.264 codec
+                    '-preset', 'medium',
+                    '-crf', '23',
+                    '-pix_fmt', 'yuv420p',  # Required for browser compatibility
+                    '-movflags', '+faststart',  # Enable fast start for web playback
+                    '-y',
+                    output_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    print("Successfully re-encoded with ffmpeg")
+                    os.remove(temp_output)
+                else:
+                    print(f"ffmpeg re-encoding failed: {result.stderr}")
+                    os.rename(temp_output, output_path)
+                    
+            except Exception as e:
+                print(f"Error during ffmpeg re-encoding: {e}")
+                os.rename(temp_output, output_path)
+        else:
+            # Just rename the temp file to final output
+            os.rename(temp_output, output_path)
         
         print(f"Video processing complete! Output saved to: {output_path}")
         return True
@@ -207,7 +266,7 @@ class DownloadVideoWithOverlay:
                 # Fallback: move temp video to final location
                 os.rename(temp_video_path, video_path)
         else:
-            # No overlay, save video directly
+            # No overlay, save video directly (UNCHANGED FROM ORIGINAL)
             with open(video_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
