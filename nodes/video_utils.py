@@ -3,6 +3,176 @@ import os
 import re
 from PIL import Image
 import folder_paths
+import json
+from typing import List, Tuple
+
+import comfy
+import comfy.sd
+import comfy.utils
+
+# ---------- Wan 2.2 LoRA JSON -> two stacks (High/Low) ----------
+
+class AV_WanLoraListStacker:
+    """
+    Parse a JSON list of Wan2.2 LoRAs and produce two LORA_STACK outputs:
+      - HIGH_LORA_STACK: list[ (lora_name_high, m, m) ]
+      - LOW_LORA_STACK : list[ (lora_name_low,  m, m) ]
+
+    Expected JSON item keys (all strings/numbers):
+      name : required high-noise LoRA filename in models/loras (e.g. "*.safetensors")
+      low  : optional low-noise LoRA filename (if omitted, LoRA is applied only to HIGH)
+      m    : model strength (float). If missing, defaults to 1.0
+      c    : clip strength (ignored for Wan, accepted for parity)
+
+    Empty, "[]", or invalid items are skipped gracefully.
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "data": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
+            },
+            "optional": {
+                "high_stack": ("LORA_STACK",),
+                "low_stack":  ("LORA_STACK",),
+            },
+        }
+
+    CATEGORY = "Art Venture/Loaders"
+    RETURN_TYPES = ("LORA_STACK", "LORA_STACK")
+    RETURN_NAMES = ("high_lora_stack", "low_lora_stack")
+    FUNCTION = "build_stacks"
+
+    def _parse(self, data: str):
+        data = (data or "").strip()
+        if not data or data == "[]":
+            return []
+
+        try:
+            cfg = json.loads(data)
+            if not isinstance(cfg, list):
+                print("[AV_WanLoraListStacker] 'data' must be a JSON array; got:", type(cfg))
+                return []
+            return cfg
+        except Exception as e:
+            print("[AV_WanLoraListStacker] JSON parse error:", e)
+            return []
+
+    def _available(self) -> set:
+        # set of filenames visible to Comfy in the "loras" search path
+        return set(folder_paths.get_filename_list("loras"))
+
+    def build_stacks(self, data, high_stack=None, low_stack=None):
+        cfg = self._parse(data)
+        avail = self._available()
+
+        high: List[Tuple[str, float, float]] = []
+        low:  List[Tuple[str, float, float]] = []
+
+        for i, item in enumerate(cfg):
+            if not isinstance(item, dict):
+                continue
+
+            name = item.get("name")
+            low_name = item.get("low")
+            m = float(item.get("m", 1.0))
+
+            # Skip zeroed entries
+            if m == 0:
+                continue
+
+            # High LoRA required to consider the entry
+            if not name or name not in avail:
+                print(f"[AV_WanLoraListStacker] Missing or unavailable HIGH LoRA at index {i}: {name!r}")
+                # still allow low-only entries? Wan typically expects high/low pairing; skip if no high
+                continue
+
+            high.append((name, m, m))
+
+            # Optional low LoRA; apply only if present & exists
+            if low_name and low_name in avail:
+                low.append((low_name, m, m))
+
+        # allow stacking with pre-existing stacks
+        if high_stack is not None:
+            high.extend([t for t in high_stack if t[0] != "None"])
+        if low_stack is not None:
+            low.extend([t for t in low_stack if t[0] != "None"])
+
+        return (high, low)
+
+
+# ---------- Wan 2.2 LoRA JSON -> apply to two models (High/Low) ----------
+
+class AV_WanLoraListLoader(AV_WanLoraListStacker):
+    """
+    Apply Wan2.2 LoRAs directly to the two expert models (model-only).
+    Inputs:
+      model_high: MODEL (Wan high-noise expert)
+      model_low : MODEL (Wan low-noise expert)
+      data      : JSON string (same as stacker)
+
+    Returns:
+      (model_high_with_loras, model_low_with_loras)
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model_high": ("MODEL",),
+                "model_low":  ("MODEL",),
+                "data": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
+            }
+        }
+
+    CATEGORY = "Art Venture/Loaders"
+    RETURN_TYPES = ("MODEL", "MODEL")
+    RETURN_NAMES = ("model_high", "model_low")
+    FUNCTION = "load_list_lora"
+
+    def _apply_lora_model_only(self, model, lora_path, strength: float):
+        # Prefer comfy.sd.load_lora_for_model if present; else fall back.
+        lora_file = comfy.utils.load_torch_file(lora_path)
+        if hasattr(comfy.sd, "load_lora_for_model"):
+            return comfy.sd.load_lora_for_model(model, lora_file, strength)
+        else:
+            # Fallback: use load_lora_for_models with clip=None and clip strength 0.0
+            model, _ = comfy.sd.load_lora_for_models(model, None, lora_file, strength, 0.0)
+            return model
+
+    def load_list_lora(self, model_high, model_low, data):
+        cfg = self._parse(data)
+        if not cfg:
+            return (model_high, model_low)
+
+        avail = self._available()
+
+        # Apply high first, then low. Missing low entries are tolerated.
+        mh = model_high
+        ml = model_low
+
+        for i, item in enumerate(cfg):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            low_name = item.get("low")
+            m = float(item.get("m", 1.0))
+            if m == 0:
+                continue
+
+            if name and name in avail:
+                path_h = folder_paths.get_full_path("loras", name)
+                mh = self._apply_lora_model_only(mh, path_h, m)
+            else:
+                print(f"[AV_WanLoraListLoader] HIGH LoRA missing/unavailable at index {i}: {name!r}")
+
+            if low_name and low_name in avail:
+                path_l = folder_paths.get_full_path("loras", low_name)
+                ml = self._apply_lora_model_only(ml, path_l, m)
+            elif low_name:
+                print(f"[AV_WanLoraListLoader] LOW LoRA missing/unavailable at index {i}: {low_name!r}")
+
+        return (mh, ml)
 
 class DownloadVideoAsOutput:
     @classmethod
@@ -93,9 +263,13 @@ class DownloadVideoAsOutput:
         }
 
 NODE_CLASS_MAPPINGS = {
-    "DownloadVideoAsOutput": DownloadVideoAsOutput
+    "DownloadVideoAsOutput": DownloadVideoAsOutput,
+    "AV_WanLoraListStacker": AV_WanLoraListStacker,
+    "AV_WanLoraListLoader":  AV_WanLoraListLoader,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DownloadVideoAsOutput": "Download Video as Output"
+    "DownloadVideoAsOutput": "Download Video as Output",
+    "AV_WanLoraListStacker": "Wan2.2 LoRA List Stacker (High/Low)",
+    "AV_WanLoraListLoader":  "Wan2.2 LoRA List Loader (High/Low)",
 }
