@@ -10,9 +10,96 @@ import comfy
 import comfy.sd
 import comfy.utils
 
+# ---------- Simple LoRA JSON list -> LORA_STACK ----------
+class LoraListStacker:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "data": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
+            },
+            "optional": {"lora_stack": ("LORA_STACK",)},
+        }
+
+    RETURN_TYPES = ("LORA_STACK",)
+    FUNCTION = "load_list_lora"
+    CATEGORY = "Custom Nodes/Loaders"
+
+    def parse_lora_list(self, data: str):
+        # data is a list of lora model (lora_name, strength_model, strength_clip, url) in json format
+        # trim data
+        data = data.strip()
+        if data == "" or data == "[]" or data is None:
+            return []
+
+        print(f"Loading lora list: {data}")
+
+        lora_list = json.loads(data)
+        if len(lora_list) == 0:
+            return []
+
+        available_loras = folder_paths.get_filename_list("loras")
+
+        lora_params = []
+        for lora in lora_list:
+            lora_name = lora["name"]
+            strength_model = lora["m"]
+            strength_clip = lora["c"]
+
+            if strength_model == 0 and strength_clip == 0:
+                continue
+
+            if lora_name not in available_loras:
+                print(f"Not found lora {lora_name}, skipping")
+                continue
+
+            lora_params.append((lora_name, strength_model, strength_clip))
+
+        return lora_params
+
+    def load_list_lora(self, data, lora_stack=None):
+        loras = self.parse_lora_list(data)
+
+        if lora_stack is not None:
+            loras.extend([l for l in lora_stack if l[0] != "None"])
+
+        return (loras,)
+
+
+class LoraListLoader(LoraListStacker):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "clip": ("CLIP",),
+                "data": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP")
+
+    def load_list_lora(self, model, clip, data):
+        lora_params = self.parse_lora_list(data)
+
+        if len(lora_params) == 0:
+            return (model, clip)
+
+        def load_loras(lora_params, model, clip):
+            for lora_name, strength_model, strength_clip in lora_params:
+                lora_path = folder_paths.get_full_path("loras", lora_name)
+                lora_file = comfy.utils.load_torch_file(lora_path)
+                model, clip = comfy.sd.load_lora_for_models(model, clip, lora_file, strength_model, strength_clip)
+            return model, clip
+
+        lora_model, lora_clip = load_loras(lora_params, model, clip)
+
+        return (lora_model, lora_clip)
+
+
 # ---------- Wan 2.2 LoRA JSON -> two stacks (High/Low) ----------
 
-class AV_WanLoraListStacker:
+class WanLoraListStacker:
     """
     Parse a JSON list of Wan2.2 LoRAs and produce two LORA_STACK outputs:
       - HIGH_LORA_STACK: list[ (lora_name_high, m, m) ]
@@ -38,7 +125,7 @@ class AV_WanLoraListStacker:
             },
         }
 
-    CATEGORY = "Art Venture/Loaders"
+    CATEGORY = "Custom Nodes/Loaders"
     RETURN_TYPES = ("LORA_STACK", "LORA_STACK")
     RETURN_NAMES = ("high_lora_stack", "low_lora_stack")
     FUNCTION = "build_stacks"
@@ -51,11 +138,11 @@ class AV_WanLoraListStacker:
         try:
             cfg = json.loads(data)
             if not isinstance(cfg, list):
-                print("[AV_WanLoraListStacker] 'data' must be a JSON array; got:", type(cfg))
+                print("[WanLoraListStacker] 'data' must be a JSON array; got:", type(cfg))
                 return []
             return cfg
         except Exception as e:
-            print("[AV_WanLoraListStacker] JSON parse error:", e)
+            print("[WanLoraListStacker] JSON parse error:", e)
             return []
 
     def _available(self) -> set:
@@ -83,7 +170,7 @@ class AV_WanLoraListStacker:
 
             # High LoRA required to consider the entry
             if not name or name not in avail:
-                print(f"[AV_WanLoraListStacker] Missing or unavailable HIGH LoRA at index {i}: {name!r}")
+                print(f"[WanLoraListStacker] Missing or unavailable HIGH LoRA at index {i}: {name!r}")
                 # still allow low-only entries? Wan typically expects high/low pairing; skip if no high
                 continue
 
@@ -104,7 +191,7 @@ class AV_WanLoraListStacker:
 
 # ---------- Wan 2.2 LoRA JSON -> apply to two models (High/Low) ----------
 
-class AV_WanLoraListLoader(AV_WanLoraListStacker):
+class WanLoraListLoader(WanLoraListStacker):
     """
     Apply Wan2.2 LoRAs directly to the two expert models (model-only).
     Inputs:
@@ -125,7 +212,7 @@ class AV_WanLoraListLoader(AV_WanLoraListStacker):
             }
         }
 
-    CATEGORY = "Art Venture/Loaders"
+    CATEGORY = "Custom Nodes/Loaders"
     RETURN_TYPES = ("MODEL", "MODEL")
     RETURN_NAMES = ("model_high", "model_low")
     FUNCTION = "load_list_lora"
@@ -164,13 +251,13 @@ class AV_WanLoraListLoader(AV_WanLoraListStacker):
                 path_h = folder_paths.get_full_path("loras", name)
                 mh = self._apply_lora_model_only(mh, path_h, m)
             else:
-                print(f"[AV_WanLoraListLoader] HIGH LoRA missing/unavailable at index {i}: {name!r}")
+                print(f"[WanLoraListLoader] HIGH LoRA missing/unavailable at index {i}: {name!r}")
 
             if low_name and low_name in avail:
                 path_l = folder_paths.get_full_path("loras", low_name)
                 ml = self._apply_lora_model_only(ml, path_l, m)
             elif low_name:
-                print(f"[AV_WanLoraListLoader] LOW LoRA missing/unavailable at index {i}: {low_name!r}")
+                print(f"[WanLoraListLoader] LOW LoRA missing/unavailable at index {i}: {low_name!r}")
 
         return (mh, ml)
 
@@ -262,14 +349,72 @@ class DownloadVideoAsOutput:
             "result": ((True, output_files),)
         }
 
+class VideoResolutionCap:
+    """
+    Caps the longest side of a resolution to max_long_side while preserving aspect ratio.
+
+    Inputs:
+      width          (INT)  : input width in pixels
+      height         (INT)  : input height in pixels
+      max_long_side  (INT)  : maximum allowed size for the longer edge
+
+    Outputs:
+      width, height (INT, INT) : possibly scaled down integers, same aspect ratio
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "width": ("INT", {"default": 1024, "min": 1, "max": 8192, "step": 1}),
+                "height": ("INT", {"default": 576,  "min": 1, "max": 8192, "step": 1}),
+                "max_long_side": ("INT", {"default": 720, "min": 1, "max": 8192, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("INT", "INT")
+    RETURN_NAMES = ("width", "height")
+    FUNCTION = "cap"
+    CATEGORY = "video"
+
+    def cap(self, width: int, height: int, max_long_side: int):
+        # No-op if already <= cap
+        long_side = max(width, height)
+        if long_side <= max_long_side:
+            return (int(width), int(height))
+
+        # Scale factor to bring longest side to exactly max_long_side
+        scale = max_long_side / float(long_side)
+
+        new_w = max(1, int(round(width * scale)))
+        new_h = max(1, int(round(height * scale)))
+
+        # Make sure rounding didn't exceed the cap due to ties
+        if max(new_w, new_h) > max_long_side:
+            # reduce by 1 pixel on the longer edge if necessary
+            if new_w >= new_h and new_w > max_long_side:
+                new_w = max_long_side
+                new_h = max(1, int(round(new_w * (height / float(width)))))
+            elif new_h > max_long_side:
+                new_h = max_long_side
+                new_w = max(1, int(round(new_h * (width / float(height)))))
+
+        return (int(new_w), int(new_h))
+
+
 NODE_CLASS_MAPPINGS = {
     "DownloadVideoAsOutput": DownloadVideoAsOutput,
-    "AV_WanLoraListStacker": AV_WanLoraListStacker,
-    "AV_WanLoraListLoader":  AV_WanLoraListLoader,
+    "WanLoraListStacker": WanLoraListStacker,
+    "WanLoraListLoader":  WanLoraListLoader,
+    "LoraListStacker": LoraListStacker,
+    "LoraListLoader":  LoraListLoader,
+    "VideoResolutionCap": VideoResolutionCap,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadVideoAsOutput": "Download Video as Output",
-    "AV_WanLoraListStacker": "Wan2.2 LoRA List Stacker (High/Low)",
-    "AV_WanLoraListLoader":  "Wan2.2 LoRA List Loader (High/Low)",
+    "WanLoraListStacker": "Wan2.2 LoRA List Stacker (High/Low)",
+    "WanLoraListLoader":  "Wan2.2 LoRA List Loader (High/Low)",
+    "LoraListStacker": "LoRA List Stacker",
+    "LoraListLoader":  "LoRA List Loader",
+    "VideoResolutionCap": "Video Resolution Cap (Max Long Side)",
 }
