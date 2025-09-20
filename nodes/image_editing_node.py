@@ -9,6 +9,8 @@ IMAGE_SIZE_PRESETS = {
     "portrait_16_9": {"width": 1440, "height": 2560},
     "landscape_4_3": {"width": 2048, "height": 1536},
     "landscape_16_9": {"width": 2560, "height": 1440},
+    "ultra_hd_landscape": {"width": 3840, "height": 2160},
+    "ultra_hd_portrait": {"width": 2160, "height": 3840},
     "custom": None,
 }
 
@@ -176,10 +178,110 @@ class Seedream40ImageEdit:
             return ApiHandler.handle_image_generation_error("Seedream 4.0 Edit", e)
 
 
+class NanoBananaImageEdit:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "image_1": ("IMAGE",),
+            },
+            "optional": {
+                "image_2": ("IMAGE",),
+                "image_3": ("IMAGE",),
+                "image_4": ("IMAGE",),
+                "image_5": ("IMAGE",),
+                "image_6": ("IMAGE",),
+                "image_7": ("IMAGE",),
+                "image_8": ("IMAGE",),
+                "image_9": ("IMAGE",),
+                "image_10": ("IMAGE",),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "output_format": (["jpeg", "png"], {"default": "jpeg"}),
+                "sync_mode": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "edit_image"
+    CATEGORY = "FAL/Image"
+
+    def edit_image(
+        self,
+        prompt,
+        image_1,
+        image_2=None,
+        image_3=None,
+        image_4=None,
+        image_5=None,
+        image_6=None,
+        image_7=None,
+        image_8=None,
+        image_9=None,
+        image_10=None,
+        num_images=1,
+        output_format="jpeg",
+        sync_mode=False,
+    ):
+        input_images = _expand_image_inputs(
+            image_1,
+            image_2,
+            image_3,
+            image_4,
+            image_5,
+            image_6,
+            image_7,
+            image_8,
+            image_9,
+            image_10,
+        )
+
+        image_urls = []
+        for idx, img in enumerate(input_images, 1):
+            url = ImageUtils.upload_image(img)
+            if not url:
+                print(f"Error: Failed to upload image {idx} for Nano Banana Edit")
+                return ResultProcessor.create_blank_image()
+            image_urls.append(url)
+            if len(image_urls) >= MAX_INPUT_IMAGES:
+                break
+
+        if not image_urls:
+            print("Error: At least one input image is required for Nano Banana Edit")
+            return ResultProcessor.create_blank_image()
+
+        if len(input_images) > MAX_INPUT_IMAGES:
+            print(
+                "Warning: Nano Banana Edit supports up to 10 input images. Extra images were ignored."
+            )
+
+        arguments = {
+            "prompt": prompt,
+            "image_urls": image_urls,
+            "num_images": num_images,
+            "output_format": output_format,
+            "sync_mode": sync_mode,
+        }
+
+        try:
+            result = ApiHandler.submit_and_get_result(
+                "fal-ai/nano-banana/edit", arguments
+            )
+            description = result.get("description")
+            if description:
+                print(f"Nano Banana Edit description: {description}")
+            return ResultProcessor.process_image_result(result)
+        except Exception as e:
+            return ApiHandler.handle_image_generation_error("Nano Banana Edit", e)
+
 NODE_CLASS_MAPPINGS = {
+    "NanoBananaEdit_fal": NanoBananaImageEdit,
     "Seedream40Edit_fal": Seedream40ImageEdit,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "NanoBananaEdit_fal": "Nano Banana Edit (fal)",
     "Seedream40Edit_fal": "Seedream 4.0 Edit (fal)",
 }
+
+
