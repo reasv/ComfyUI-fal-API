@@ -3,6 +3,7 @@ import importlib.util
 
 node_list = [
     "image_node",
+    "image_editing_node",
     "video_node",
     "llm_node",
     "vlm_node",
