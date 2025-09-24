@@ -5,6 +5,7 @@ node_list = [
     "image_node",
     "image_editing_node",
     "video_node",
+    "wan_speech_to_video_node",
     "llm_node",
     "vlm_node",
     "trainer_node",
