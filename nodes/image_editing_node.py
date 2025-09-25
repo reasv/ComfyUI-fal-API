@@ -520,7 +520,7 @@ class FalImageEdit:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (["seedream_v4", "nano_banana"], {"default": "seedream_v4"}),
+                "model": (["seedream_v4", "nano_banana", "qwen_image_edit_plus"], {"default": "seedream_v4"}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "image_urls_json": ("STRING", {"default": "[]", "multiline": True}),
                 "width": (
@@ -535,10 +535,14 @@ class FalImageEdit:
             "optional": {
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 6}),
                 "max_images": ("INT", {"default": 1, "min": 1, "max": 6}),
+                "num_inference_steps": ("INT", {"default": 50, "min": 2, "max": 100}),
+                "guidance_scale": ("FLOAT", {"default": 4.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "negative_prompt": ("STRING", {"default": " ", "multiline": True}),
                 "seed": ("INT", {"default": -1}),
                 "sync_mode": ("BOOLEAN", {"default": False}),
                 "enable_safety_checker": ("BOOLEAN", {"default": True}),
                 "output_format": (["jpeg", "png"], {"default": "jpeg"}),
+                "acceleration": (["none", "regular"], {"default": "regular"}),
             },
         }
 
@@ -559,6 +563,10 @@ class FalImageEdit:
         sync_mode=False,
         enable_safety_checker=True,
         output_format="jpeg",
+        num_inference_steps=50,
+        guidance_scale=4.0,
+        negative_prompt=" ",
+        acceleration="regular",
     ):
         image_urls = self._parse_image_urls(image_urls_json)
         if not image_urls:
@@ -585,9 +593,73 @@ class FalImageEdit:
                 output_format,
                 sync_mode,
             )
+        if model == "qwen_image_edit_plus":
+            return self._run_qwen_image_edit_plus(
+                prompt,
+                image_urls,
+                width,
+                height,
+                num_images,
+                seed,
+                sync_mode,
+                enable_safety_checker,
+                output_format,
+                negative_prompt,
+                num_inference_steps,
+                guidance_scale,
+                acceleration,
+            )
 
         print(f"Error: Unsupported model selection '{model}'.")
         return ResultProcessor.create_blank_image()
+
+    def _run_qwen_image_edit_plus(
+        self,
+        prompt,
+        image_urls,
+        width,
+        height,
+        num_images,
+        seed,
+        sync_mode,
+        enable_safety_checker,
+        output_format,
+        negative_prompt,
+        num_inference_steps,
+        guidance_scale,
+        acceleration,
+    ):
+        if num_images > 4:
+            print("Warning: Qwen Image Edit Plus supports up to 4 generated images; clamping num_images to 4.")
+            num_images = 4
+
+        arguments = {
+            "prompt": prompt,
+            "image_urls": image_urls,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "num_images": num_images,
+            "negative_prompt": negative_prompt if negative_prompt else " ",
+            "sync_mode": sync_mode,
+            "enable_safety_checker": enable_safety_checker,
+            "output_format": output_format,
+            "acceleration": acceleration,
+            "image_size": {"width": width, "height": height},
+        }
+
+        if seed != -1:
+            arguments["seed"] = seed
+
+        try:
+            result = ApiHandler.submit_and_get_result(
+                "fal-ai/qwen-image-edit-plus", arguments
+            )
+            return ResultProcessor.process_image_result(result)
+        except Exception as e:
+            return ApiHandler.handle_image_generation_error(
+                "Qwen Image Edit Plus",
+                e,
+            )
 
     @staticmethod
     def _parse_image_urls(image_urls_json):
@@ -707,9 +779,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "QwenImageEditPlus_fal": "Qwen Image Edit Plus (fal)",
     "NanoBananaEdit_fal": "Nano Banana Edit (fal)",
     "Seedream40Edit_fal": "Seedream 4.0 Edit (fal)",
-    "FalImageEdit_fal": "Seedream/Nano Banana Edit (fal)",
+    "FalImageEdit_fal": "Seedream/Nano/Qwen Edit (fal)",
 }
-
-
-
-
