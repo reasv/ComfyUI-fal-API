@@ -368,6 +368,153 @@ class QwenImageEdit:
             return ApiHandler.handle_image_generation_error("Qwen Image Edit", e)
 
 
+class QwenImageEditPlus:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "image_1": ("IMAGE",),
+            },
+            "optional": {
+                "image_2": ("IMAGE",),
+                "image_3": ("IMAGE",),
+                "image_4": ("IMAGE",),
+                "image_5": ("IMAGE",),
+                "image_6": ("IMAGE",),
+                "image_7": ("IMAGE",),
+                "image_8": ("IMAGE",),
+                "image_9": ("IMAGE",),
+                "image_10": ("IMAGE",),
+                "image_size": (
+                    list(IMAGE_SIZE_PRESETS.keys()),
+                    {"default": "square_hd"},
+                ),
+                "width": (
+                    "INT",
+                    {"default": 2048, "min": 512, "max": 4096, "step": 16},
+                ),
+                "height": (
+                    "INT",
+                    {"default": 2048, "min": 512, "max": 4096, "step": 16},
+                ),
+                "num_inference_steps": ("INT", {"default": 50, "min": 2, "max": 100}),
+                "guidance_scale": (
+                    "FLOAT",
+                    {"default": 4.0, "min": 0.0, "max": 20.0, "step": 0.1},
+                ),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "seed": ("INT", {"default": -1}),
+                "negative_prompt": ("STRING", {"default": " ", "multiline": True}),
+                "sync_mode": ("BOOLEAN", {"default": False}),
+                "enable_safety_checker": ("BOOLEAN", {"default": True}),
+                "output_format": (["png", "jpeg"], {"default": "png"}),
+                "acceleration": (["none", "regular"], {"default": "regular"}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "edit_image"
+    CATEGORY = "FAL/Image"
+
+    def edit_image(
+        self,
+        prompt,
+        image_1,
+        image_2=None,
+        image_3=None,
+        image_4=None,
+        image_5=None,
+        image_6=None,
+        image_7=None,
+        image_8=None,
+        image_9=None,
+        image_10=None,
+        image_size="square_hd",
+        width=2048,
+        height=2048,
+        num_inference_steps=50,
+        guidance_scale=4.0,
+        num_images=1,
+        seed=-1,
+        negative_prompt=" ",
+        sync_mode=False,
+        enable_safety_checker=True,
+        output_format="png",
+        acceleration="regular",
+    ):
+        input_images = _expand_image_inputs(
+            image_1,
+            image_2,
+            image_3,
+            image_4,
+            image_5,
+            image_6,
+            image_7,
+            image_8,
+            image_9,
+            image_10,
+        )
+
+        image_urls = []
+        for idx, img in enumerate(input_images, 1):
+            url = ImageUtils.upload_image(img)
+            if not url:
+                print(f"Error: Failed to upload image {idx} for Qwen Image Edit Plus")
+                return ResultProcessor.create_blank_image()
+            image_urls.append(url)
+            if len(image_urls) >= MAX_INPUT_IMAGES:
+                break
+
+        if not image_urls:
+            print("Error: At least one input image is required for Qwen Image Edit Plus")
+            return ResultProcessor.create_blank_image()
+
+        if len(input_images) > MAX_INPUT_IMAGES:
+            print(
+                "Warning: Qwen Image Edit Plus supports up to 10 input images. Extra images were ignored."
+            )
+
+        if num_images > 4:
+            print(
+                "Warning: Qwen Image Edit Plus supports up to 4 generated images; clamping num_images to 4."
+            )
+            num_images = 4
+
+        arguments = {
+            "prompt": prompt,
+            "image_urls": image_urls,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "num_images": num_images,
+            "negative_prompt": negative_prompt,
+            "sync_mode": sync_mode,
+            "enable_safety_checker": enable_safety_checker,
+            "output_format": output_format,
+            "acceleration": acceleration,
+        }
+
+        if image_size == "custom":
+            arguments["image_size"] = {"width": width, "height": height}
+        elif image_size:
+            preset = IMAGE_SIZE_PRESETS.get(image_size)
+            if preset:
+                arguments["image_size"] = preset
+
+        if seed != -1:
+            arguments["seed"] = seed
+
+        try:
+            result = ApiHandler.submit_and_get_result(
+                "fal-ai/qwen-image-edit-plus", arguments
+            )
+            return ResultProcessor.process_image_result(result)
+        except Exception as e:
+            return ApiHandler.handle_image_generation_error(
+                "Qwen Image Edit Plus", e
+            )
+
+
 class FalImageEdit:
     @classmethod
     def INPUT_TYPES(cls):
@@ -549,6 +696,7 @@ class FalImageEdit:
 
 NODE_CLASS_MAPPINGS = {
     "QwenImageEdit_fal": QwenImageEdit,
+    "QwenImageEditPlus_fal": QwenImageEditPlus,
     "NanoBananaEdit_fal": NanoBananaImageEdit,
     "Seedream40Edit_fal": Seedream40ImageEdit,
     "FalImageEdit_fal": FalImageEdit,
@@ -556,6 +704,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "QwenImageEdit_fal": "Qwen Image Edit (fal)",
+    "QwenImageEditPlus_fal": "Qwen Image Edit Plus (fal)",
     "NanoBananaEdit_fal": "Nano Banana Edit (fal)",
     "Seedream40Edit_fal": "Seedream 4.0 Edit (fal)",
     "FalImageEdit_fal": "Seedream/Nano Banana Edit (fal)",
