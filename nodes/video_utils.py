@@ -409,7 +409,10 @@ class VideoFramesFromSeconds:
             "required": {
                 "seconds": ("STRING", {"default": "1", "multiline": False, "dynamicPrompts": False}),
                 "frame_rate": ("INT", {"default": 24, "min": 1, "max": 240, "step": 1}),
-            }
+            },
+            "optional": {
+                "frame_cap": ("INT", {"default": 0, "min": 0, "max": 1000000, "step": 1}),
+            },
         }
 
     RETURN_TYPES = ("INT",)
@@ -434,9 +437,11 @@ class VideoFramesFromSeconds:
         number = float(match.group(1))
         return number
 
-    def frames(self, seconds: str, frame_rate: int):
+    def frames(self, seconds: str, frame_rate: int, frame_cap: int = 0):
         secs = self._parse_seconds(seconds)
-        frame_count = int(secs * frame_rate)
+        frame_count = int(secs * frame_rate) + 1
+        if frame_cap and frame_cap > 0:
+            frame_count = min(frame_count, frame_cap)
         return (frame_count,)
 
 NODE_CLASS_MAPPINGS = {
