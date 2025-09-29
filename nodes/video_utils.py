@@ -436,7 +436,7 @@ class VideoFramesFromSeconds:
 
     def frames(self, seconds: str, frame_rate: int):
         secs = self._parse_seconds(seconds)
-        frame_count = int(secs * frame_rate) + 1
+        frame_count = int(secs * frame_rate)
         return (frame_count,)
 
 NODE_CLASS_MAPPINGS = {
