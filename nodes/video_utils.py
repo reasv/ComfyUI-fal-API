@@ -401,12 +401,51 @@ class VideoResolutionCap:
         return (int(new_w), int(new_h))
 
 
+class VideoFramesFromSeconds:
+    """Convert a duration string and frame rate into a frame count."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "seconds": ("STRING", {"default": "1", "multiline": False, "dynamicPrompts": False}),
+                "frame_rate": ("INT", {"default": 24, "min": 1, "max": 240, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("frames",)
+    FUNCTION = "frames"
+    CATEGORY = "video"
+
+    _SECONDS_REGEX = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds)?\s*$", re.IGNORECASE)
+
+    def _parse_seconds(self, value: str) -> float:
+        if value is None:
+            raise ValueError("seconds input must be a string")
+
+        value = value.strip()
+        if not value:
+            return 0.0
+
+        match = self._SECONDS_REGEX.match(value)
+        if not match:
+            raise ValueError(f"Invalid seconds format: '{value}'")
+
+        number = float(match.group(1))
+        return number
+
+    def frames(self, seconds: str, frame_rate: int):
+        secs = self._parse_seconds(seconds)
+        frame_count = int(secs * frame_rate) + 1
+        return (frame_count,)
+
 NODE_CLASS_MAPPINGS = {
     "DownloadVideoAsOutput": DownloadVideoAsOutput,
     "WanLoraListStacker": WanLoraListStacker,
     "WanLoraListLoader":  WanLoraListLoader,
     "LoraListStacker": LoraListStacker,
     "LoraListLoader":  LoraListLoader,
+    "VideoFramesFromSeconds": VideoFramesFromSeconds,
     "VideoResolutionCap": VideoResolutionCap,
 }
 
@@ -416,5 +455,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanLoraListLoader":  "Wan2.2 LoRA List Loader (High/Low)",
     "LoraListStacker": "LoRA List Stacker",
     "LoraListLoader":  "LoRA List Loader",
+    "VideoFramesFromSeconds": "Video Frames From Seconds",
     "VideoResolutionCap": "Video Resolution Cap (Max Long Side)",
 }
